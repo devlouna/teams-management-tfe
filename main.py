@@ -8,7 +8,7 @@ Requires:
  - TFE_HOST optional (default: https://app.terraform.io)
 
 Usage:
-python remove_user_from_team.py --org my-org --team "Team Name" --email user@example.com 
+python main.py --org my-org --team "Team Name" --email user@example.com 
 """
 import os
 import sys
