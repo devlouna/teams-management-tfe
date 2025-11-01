@@ -53,30 +53,30 @@ python main.py --org prod-tdmund-tf --team owners --email user1@example.com
 Multiple emails (repeat flag or space-separated):
 
 ```bash
-python main.py --org prod-tdmund-tf --team owners \
+python main.py --org prod-tdmund --team owners \
 	--email user1@example.com --email user2@example.com
 
-python main.py --org prod-tdmund-tf --team owners \
+python main.py --org prod-tdmund --team owners \
 	--email user1@example.com user2@example.com user3@gmail.com
 ```
 
 Comma-separated (quote to avoid shell splitting), also supported:
 
 ```bash
-python main.py --org prod-tdmund-tf --team owners --email 'user1@example.com, user2@example.com'
+python main.py --org prod-tdmund --team owners --email 'user1@example.com, user2@example.com'
 ```
 
 From a file (must be UTF-8 .txt; comments with `#` are ignored; commas or newlines are accepted):
 
 ```bash
-python main.py --org prod-tdmund-tf --team owners --emails-file /path/to/emails.txt
+python main.py --org prod-tdmund --team owners --emails-file /path/to/emails.txt
 ```
 
 From stdin:
 
 ```bash
 echo -e "user1@example.com\nuser2@example.com" | \
-	python main.py --org prod-tdmund-tf --team owners --emails-file -
+	python main.py --org prod-tdmund --team owners --emails-file -
 ```
 
 The script merges emails from flags and file, trims whitespace, removes duplicates (preserving order), and validates the file is UTF-8 text (rejects binary files) with a `.txt` extension (when using a path).

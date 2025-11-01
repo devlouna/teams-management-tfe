@@ -16,6 +16,7 @@ import argparse
 import requests
 import time
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -160,8 +161,8 @@ def main():
         for group in args.emails:
             tokens.extend(group)
         for token in tokens:
-            # split commas inside tokens, strip whitespace; allow trailing commas
-            parts = [p.strip() for p in str(token).split(',') if p and p.strip()]
+            # split commas/semicolons inside tokens, strip whitespace
+            parts = [p.strip() for p in re.split(r"[;,]", str(token)) if p and p.strip()]
             emails.extend(parts)
 
     # From file or stdin
@@ -217,7 +218,8 @@ def main():
             line = raw_line.split('#', 1)[0]
             if not line.strip():
                 continue
-            lines.extend(line.split(','))
+            # split by commas or semicolons
+            lines.extend(re.split(r"[;,]", line))
         file_emails = [x.strip() for x in lines if x and x.strip()]
         emails.extend(file_emails)
 
@@ -310,7 +312,7 @@ def main():
                 f" - response: {resp_text}"
             )
     else:
-        logger.warning(f"\n 🌝 No valid Users found to remove from the team {args.team}...")
+        logger.warning(f"\n 🌝 No valid Users found to be removed from the team '{args.team}'...")
 
 
     print("\n ⭐⭐⭐*********** Operation completed successfully!!! *************⭐⭐⭐ \n")
