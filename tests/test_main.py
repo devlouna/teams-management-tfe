@@ -2,7 +2,6 @@ import importlib
 import sys
 from types import SimpleNamespace
 
-import builtins
 import os
 import pytest
 
