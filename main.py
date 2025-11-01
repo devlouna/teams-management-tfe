@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 
-
 """
-Remove a user (by email) from a Terraform Cloud / Enterprise team.
+Remove a user (by email) from a Terraform Cloud / Enterprise Team.
 
 Requires:
  - TFE_TOKEN environment variable (API token)
  - TFE_HOST optional (default: https://app.terraform.io)
 
 Usage:
- python remove_user_from_team.py --org my-org --team "Team Name" --email user@example.com [--dry-run]
+python main.py --org my-org --team "Team Name" --email user@example.com 
 """
 import os
 import sys
 import argparse
 import requests
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,8 +25,13 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 
-TFE_HOST = os.environ.get("TFE_HOST", "https://app.terraform.io")
+TFE_HOST = os.environ.get("TFE_HOST")
+if not TFE_HOST:
+    print("Error: TFE_HOST environment variable is required (e.g., https://app.terraform.io)", file=sys.stderr)
+    sys.exit(1)
+
 API_BASE = f"{TFE_HOST.rstrip('/')}/api/v2"
+
 TOKEN    = os.environ.get("TFE_TOKEN")
 
 if not TOKEN:
@@ -112,7 +117,6 @@ def remove_org_memberships_from_team(team_id, org_membership_ids, team_name):
 
     # Wait 3 seconds after the request as requested
     try:
-        import time
         time.sleep(3)
     except Exception:
         pass
@@ -125,34 +129,103 @@ def remove_org_memberships_from_team(team_id, org_membership_ids, team_name):
 def main():
     """CLI: find user(s), validate target team by name, and check membership for each email.
 
-    Emails can be provided multiple times (--email a --email b) or as a comma-separated list
-    (--email a,b or --emails a,b)."""
+    Emails can be provided multiple times 
+        (--email a --email b) or as a comma-separated list
+        (--email a,b or --emails a,b).
+    """
     p = argparse.ArgumentParser(description="Find user(s) by email, validate team by name, and check membership")
     p.add_argument("--org", required=True, help="Organization name")
-    p.add_argument(
-        "--email", "--emails", dest="emails", required=True, action="append", nargs="+",
+    p.add_argument("--email", "--emails", dest="emails", required=False, action="append", nargs="+",
         help=(
             "Email(s) to search. Supports: repeat flag (--email a --email b), "
             "space-separated (--email a b), or comma-separated (--email 'a,b')."
         ),
     )
+    p.add_argument("--emails-file", "--file", "-f", dest="emails_file", required=False,
+        help=(
+            "Path to a UTF-8 .txt file with emails (one per line or comma-separated). "
+            "Use '-' to read from stdin."
+        ),
+    )
     p.add_argument("--team", required=True, help="Team name to validate and check membership")
     args = p.parse_args()
 
-    # Normalize emails: support repeated flags and comma-separated lists
-    # args.emails is a list of lists due to action=append + nargs="+"
-    tokens = []
-    for group in args.emails:
-        tokens.extend(group)
-
+    # Normalize emails from CLI and/or file
     emails = []
-    for token in tokens:
-        # split commas inside tokens, strip whitespace; allow trailing commas
-        parts = [p.strip() for p in str(token).split(',') if p and p.strip()]
-        emails.extend(parts)
+
+    # From CLI flags --email/--emails
+    if args.emails:
+        tokens = []
+        # args.emails is a list of lists due to action=append + nargs="+"
+        for group in args.emails:
+            tokens.extend(group)
+        for token in tokens:
+            # split commas inside tokens, strip whitespace; allow trailing commas
+            parts = [p.strip() for p in str(token).split(',') if p and p.strip()]
+            emails.extend(parts)
+
+    # From file or stdin
+    if args.emails_file:
+        try:
+            if args.emails_file == "-":
+                content = sys.stdin.read()
+            else:
+                # Enforce .txt extension for file paths (stdin '-' is exempt)
+                if not args.emails_file.lower().endswith('.txt'):
+                    print(
+                        f"Emails file must have .txt extension: '{args.emails_file}'",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+            # Read raw bytes for validation (stdin or file)
+            if args.emails_file == "-":
+                try:
+                    raw = sys.stdin.buffer.read()
+                except Exception:
+                    # Fallback: read text and encode best-effort
+                    raw = (sys.stdin.read() or "").encode("utf-8", errors="ignore")
+            else:
+                with open(args.emails_file, "rb") as f:
+                    raw = f.read()
+
+            # Basic binary check: reject if NUL bytes present
+            if b"\x00" in raw:
+                print(
+                    f"Emails file appears to be binary (contains NUL bytes): '{args.emails_file}'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            # Require UTF-8 decodable content
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                print(
+                    f"Emails file must be UTF-8 text: '{args.emails_file}'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        except Exception as e:
+            print(f"Failed to read emails file '{args.emails_file}': {e}")
+            sys.exit(1)
+
+        # Split by newlines and commas; strip inline comments starting with '#'
+        lines = []
+        for raw_line in content.splitlines():
+            # remove comments
+            line = raw_line.split('#', 1)[0]
+            if not line.strip():
+                continue
+            lines.extend(line.split(','))
+        file_emails = [x.strip() for x in lines if x and x.strip()]
+        emails.extend(file_emails)
+
+    # Deduplicate while preserving order
+    emails = list(dict.fromkeys(emails))
 
     if not emails:
-        print("No valid emails provided.")
+        print("No valid emails provided. Use --email/--emails and/or -f, --emails-file, --file.")
         sys.exit(1)
 
     # Step 2: find the team by name in org teams once
@@ -176,8 +249,8 @@ def main():
     membership_ids_to_remove = []  # Collect valid org_membership_ids for removal in one request
     email_by_membership_id   = {}
 
+    # Part 1: Process each email
     print("\n ************* Processing Users details and retrieving their TFE data ****************")
-    # Process each email
     for email in emails:
         logger.info(f"\n♻️️️️️️ Processing email: {email}")
 
@@ -217,15 +290,15 @@ def main():
             )
             overall_status = max(overall_status, 3)
 
-    # Perform a single bulk delete request for all queued users
-    print("\n ************* Starting removal process for all users from TFE ****************")
+    # Part 2: Perform a single bulk delete request for all queued users
     if membership_ids_to_remove:
+        print("\n ************* Starting removal process for all users from TFE ****************")
         ok, status_code, resp_text = remove_org_memberships_from_team(team_id, membership_ids_to_remove, args.team)
         if ok:
             for oid in membership_ids_to_remove:
                 email = email_by_membership_id.get(oid, "<unknown>")
                 logger.info(
-                    f"✅ User '{email}' with organization-membership '{oid}' successfully removed from team '{args.team}'."
+                    f"\n ✅ User '{email}' with organization-membership '{oid}' successfully removed from team '{args.team}'."
                 )
         else:
             overall_status = max(overall_status, 4)
@@ -237,11 +310,11 @@ def main():
                 f" - response: {resp_text}"
             )
     else:
-        logger.info(f"\n 🌝 No validated users to remove from the team {args.team}...")
+        logger.warning(f"\n 🌝 No valid Users found to remove from the team {args.team}...")
 
+
+    print("\n ⭐⭐⭐*********** Operation completed successfully!!! *************⭐⭐⭐ \n")
     sys.exit(overall_status)
-
 
 if __name__ == "__main__":
     main()
-

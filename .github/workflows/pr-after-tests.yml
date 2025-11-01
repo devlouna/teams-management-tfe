@@ -1,0 +1,61 @@
+name: pr-after-tests
+
+on:
+  workflow_run:
+    workflows: ["ci-tests-dev"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'dev' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository at dev commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Create or reuse PR dev -> main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = 'dev';
+            const base = 'main';
+
+            // Look for an existing open PR from dev to main
+            const { data: prs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:${head}`,
+              base,
+              per_page: 100,
+            });
+
+            if (prs.length > 0) {
+              core.info(`PR already exists: #${prs[0].number}`);
+              core.setOutput('pr_number', prs[0].number);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner,
+              repo,
+              head,
+              base,
+              title: 'Automated PR: dev -> main',
+              body: 'This PR was opened automatically after successful CI on dev.',
+              maintainer_can_modify: true,
+            });
+
+            core.info(`Created PR #${pr.number}`);
+            core.setOutput('pr_number', pr.number);
